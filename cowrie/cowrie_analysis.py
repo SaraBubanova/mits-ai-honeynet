@@ -1,5 +1,6 @@
 import time
 import os
+import sys
 import json
 import requests
 import statistics
@@ -161,6 +162,13 @@ def query_abuseipdb(ip, cache):
 
 # Sequential, given attempts are limited would not do it in parallel
 def enrich_with_abuseipdb(ip_data, max_queries=ABUSEIPDB_ATTEMPTS):
+  # no key in .env -> skip the lookups instead of waiting 1s per failed request
+  if ABUSEIPDB_KEY == "none":
+    print("No ABUSEIPDB_KEY found, skipping AbuseIPDB")
+    for data in ip_data.values():
+      data["abuse"] = None
+    return ip_data
+    
   cache = load_cache()
 
   uncached = []
@@ -363,6 +371,29 @@ def run_prefixspan(ip_commands, min_support_pct, normalise):
   patterns.sort(key=lambda x: x[0], reverse=True)
   return patterns, n
 
+# LogPrecis (Boffa et al., 2024): labels each session with MITRE ATT&CK tactics.
+# The fingerprint is the order of tactics in a session, e.g. "Discovery -> Execution".
+def label_sessions_logprecis(ip_commands):
+  from transformers import pipeline
+  model = pipeline(
+    "token-classification",
+    model="SmartDataPolito/logprecis",
+    aggregation_strategy="simple",
+    device="cpu", # mps crashes on mac
+  )
+  total = sum(len(d["sessions"]) for d in ip_commands.values())
+  done = 0
+  for data in ip_commands.values():
+    data["fingerprints"] = {}
+    for sid, commands in data["sessions"].items():
+      text = " ; ".join(normalise_command(cmd) for _, cmd in commands)[:1000]
+      tactics = [t["entity_group"] for t in model(text)]
+      data["fingerprints"][sid] = " -> ".join(dict.fromkeys(tactics))
+      done += 1
+      if done % 100 == 0:
+        print(f"LogPrecis: {done}/{total} sessions")
+  return ip_commands
+
 # Chacon et al. (2020) citing Kemppainen et al.: bots are identified through "command timestamp consistency and delay between
 # commands, command execution despite errors in the previous command, and detecting the same command executed over separate sessions."
 def get_inter_command_intervals(ip):
@@ -536,10 +567,13 @@ def classify_skill(data, timing, ici):
   return "script_kiddie"
 
 if __name__ == "__main__":
-  cowrie_files = sorted(Path("samples").rglob("cowrie*.json*"))
+    # input folder can be given as argument, default is samples/
+  input_folder = sys.argv[1] if len(sys.argv) > 1 else "samples"
+  cowrie_files = sorted(Path(input_folder).rglob("cowrie*.json*"))
   print(f"{len(cowrie_files)} files to process\n")
 
   ip_commands, credentials = process_all(cowrie_files)
+  ip_commands = label_sessions_logprecis(ip_commands)
   
   classified_output = {}
   for ip, data in ip_commands.items():
@@ -561,7 +595,8 @@ if __name__ == "__main__":
       "ici": inter_command_intervals,
       "total_commands": data["total_commands"],
       "total_sessions": data["total_sessions"],
-      "abuse_score": abuse.get("abuseConfidenceScore")
+      "abuse_score": abuse.get("abuseConfidenceScore"),
+      "fingerprints": dict(Counter(data["fingerprints"].values())),
     }
 
   out = Path("results")
@@ -581,6 +616,23 @@ if __name__ == "__main__":
   }
 
   (out / "ip_classification_summary.json").write_text(json.dumps(summary, indent=2))
+
+  # most common fingerprints over all sessions, and per skill level
+  fp_counts = Counter(fp for d in ip_commands.values() for fp in d["fingerprints"].values())
+  fp_by_skill = {}
+  for ip, d in classified_output.items():
+    skill = d["skill"].split(":")[0]
+    fp_by_skill.setdefault(skill, Counter()).update(d["fingerprints"])
+  fingerprint_summary = {
+    "total_sessions": sum(fp_counts.values()),
+    "fingerprints": fp_counts.most_common(),
+    "by_skill": {s: c.most_common(10) for s, c in fp_by_skill.items()},
+  }
+  (out / "fingerprint_summary.json").write_text(json.dumps(fingerprint_summary, indent=2))
+
+  print("\nMost common fingerprints:")
+  for fp, n in fp_counts.most_common(10):
+    print(f"{n:>6}  {fp}")
 
   print(f"\nTotal IPs classified: {total}")
   for skill, count in skill_counts.most_common():

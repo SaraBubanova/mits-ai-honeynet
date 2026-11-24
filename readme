@@ -1,0 +1,19 @@
+source .venv/bin/activate
+
+pip install -r requirements.txt
+
+pip install --upgrade pip
+
+caffeinate -i python suricata_analysis.py
+
+caffeinate -i python cowrie_analysis.py
+
+pkill -f pcap_analysis.py
+
+pkill caffeinate
+
+rm results/port_80/*_enriched.csv
+
+rm results/port_22/*_enriched.csv
+
+iostat -w 2

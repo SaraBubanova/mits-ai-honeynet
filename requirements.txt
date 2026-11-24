@@ -1,0 +1,5 @@
+numpy
+pandas
+nfstream
+python-dotenv
+prefixspan

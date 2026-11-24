@@ -1,0 +1,13 @@
+*/samples
+*/results_real
+*/samples_real
+*/results
+*/preprocessed_pcaps
+*/results_without_splt_direction
+*/results_final_copy
+*/clusters*
+*/cluster_representatives
+*/figures*
+.env
+.DS_Store
+**/.DS_Store

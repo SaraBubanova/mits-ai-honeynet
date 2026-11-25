@@ -1,0 +1,11 @@
+target-version = "py313"
+extend-exclude = ["*.ipynb"]   # skip Jupyter notebooks
+
+[lint]
+ignore = [
+  "BLE001",  # catching Exception is intentional in worker code
+  "S110",    # try/except/pass
+  "S112",    # try/except/continue
+  "SIM113",  # manual counters
+  "SIM115",  # file handles kept open on purpose
+]

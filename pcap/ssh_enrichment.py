@@ -1,9 +1,10 @@
+import shutil
 import subprocess
 import tempfile
-import shutil
-import pandas as pd
-from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
+
+import pandas as pd
 
 SPLIT_DIR = Path("preprocessed_pcaps")
 RESULTS_DIR = Path("results") / "port_22"
@@ -145,14 +146,14 @@ def enrich_chunk(flow_csv):
 
   if pcap_path is None:
     print(f"No pcap found for {flow_csv.name}")
-    return None
+    return
 
   out_path = RESULTS_DIR / f"{flow_csv.stem}_enriched.csv"
 
   # Skip processing if the final enriched CSV already exists.
   if out_path.exists():
     print(f"Skipping already exists: {out_path.name}")
-    return None
+    return
 
   df_flow = pd.read_csv(flow_csv, low_memory=False)
 
@@ -169,14 +170,14 @@ def enrich_chunk(flow_csv):
       if ssh_log is None:
         print(f"No ssh.log for {pcap_path.name}")
         df_flow.to_csv(out_path, index=False)
-        return None
+        return
 
       df_ssh = parse_zeek_ssh(ssh_log)
 
   if df_ssh.empty:
     print(f"No SSH traffic in {pcap_path.name}")
     df_flow.to_csv(out_path, index=False)
-    return None
+    return
 
   results = []
 
@@ -210,7 +211,7 @@ def enrich_chunk(flow_csv):
   if not results:
     print(f"No matches for {pcap_path.name}")
     df_flow.to_csv(out_path, index=False)
-    return None
+    return
 
   df_results = pd.DataFrame(results)
 
@@ -236,7 +237,7 @@ def enrich_chunk(flow_csv):
   enriched["ssh_record_count"] = enriched["ssh_record_count"].fillna(0).astype(int)
   enriched.to_csv(out_path, index=False)
   print(f"Saved {out_path.name}")
-  return None
+  return
 
 # Same as in pcap_analysis
 def merge_and_sort_enriched():

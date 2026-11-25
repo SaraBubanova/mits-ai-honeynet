@@ -1,9 +1,10 @@
-from nfstream import NFStreamer
-from pathlib import Path
-import pandas as pd
-import subprocess
 import shutil
+import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
+
+import pandas as pd
+from nfstream import NFStreamer
 
 PORTS = [22, 23, 80, 10110]
 MAX_PCAP_SIZE_GB = 1
@@ -130,7 +131,7 @@ def process_pcap_folder(max_workers=MAX_WORKERS):
         print(f"\nProgress: {completed}/{len(chunks)} completed tasks\n")
 
   if failed:
-    print(f"List of Failed chunks:")
+    print("List of Failed chunks:")
     for chunk, errors in failed:
       print(f"{chunk.name}: {errors}")
   else:

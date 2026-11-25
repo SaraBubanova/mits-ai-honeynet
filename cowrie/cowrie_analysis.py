@@ -1,15 +1,16 @@
-import time
-import os
 import json
-import requests
-import statistics
+import os
 import re
-from pathlib import Path
-from prefixspan import PrefixSpan
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from dotenv import load_dotenv, find_dotenv
-from datetime import datetime
+import statistics
+import time
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from datetime import datetime
+from pathlib import Path
+
+import requests
+from dotenv import find_dotenv, load_dotenv
+from prefixspan import PrefixSpan
 
 MAX_WORKERS = 4
 
@@ -373,7 +374,7 @@ def get_inter_command_intervals(ip):
     # Sort by timestamp within session
     try:
       sorted_cmds = sorted( session_commands, key=lambda x: x[0] ) # timestamp
-      timestamps = [datetime.fromisoformat(ts.replace('Z', '+00:00')) for ts, _ in sorted_cmds]
+      timestamps = [datetime.fromisoformat(ts) for ts, _ in sorted_cmds]
       intervals = [
         (timestamps[i+1] - timestamps[i]).total_seconds()
         for i in range(len(timestamps) - 1)
@@ -398,8 +399,8 @@ def get_inter_command_intervals(ip):
 def get_timing_features(ip):
   durations   = []
   
-  for time in ip.get('session_timing').values():
-    duration_seconds = time.get('duration_seconds')
+  for timing in ip.get('session_timing').values():
+    duration_seconds = timing.get('duration_seconds')
     if duration_seconds is not None:
       durations.append(duration_seconds)
 
@@ -457,11 +458,11 @@ def classify_skill(data, timing, ici):
   # rm -rf alone is too common in automated scripts to be discriminating.
   has_cleanup = 'history -c' in ' '.join(all_commands)
 
-  abuse_categories = set(
+  abuse_categories = {
     cat
     for r in abuse.get("reports", [])
     for cat in r.get("categories", [])
-  )
+  }
   known_brute   = 18 in abuse_categories
   known_malware = 20 in abuse_categories
 
@@ -585,7 +586,7 @@ if __name__ == "__main__":
   print(f"\nTotal IPs classified: {total}")
   for skill, count in skill_counts.most_common():
     print(f"{skill} {count} ({100*count/total:.1f}%)")
-  print(f"\n")
+  print("\n")
   # for pct in [0.001, 0.005, 0.01, 0.05]: # Increase to find more common patterns (Useful for botnet detection)
   #   print(f"\nMin support: {pct*100}%\n")
   #   patterns, n = run_prefixspan(ip_commands, pct)

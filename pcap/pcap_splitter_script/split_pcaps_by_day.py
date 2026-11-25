@@ -29,7 +29,7 @@ import shutil
 import struct
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # magic -> (struct endian prefix, timestamp fraction divisor)
 PCAP_MAGICS = {
@@ -42,7 +42,7 @@ PCAPNG_MAGIC = b'\x0a\x0d\x0d\x0a'
 
 # Some datasets are anonymised: timestamps count from zero (1970) instead of the real
 # capture time, so splitting by day is meaningless. Anything earlier than this is suspect.
-MIN_REAL_TS = datetime(2000, 1, 1, tzinfo=timezone.utc).timestamp()
+MIN_REAL_TS = datetime(2000, 1, 1, tzinfo=UTC).timestamp()
 
 
 def iter_packets(path):
@@ -73,7 +73,7 @@ def iter_packets(path):
 
 def resolve_tz(name):
     if name.upper() == 'UTC':
-        return timezone.utc
+        return UTC
     if name.upper() == 'LOCAL':
         return None  # None -> use system local time
     try:

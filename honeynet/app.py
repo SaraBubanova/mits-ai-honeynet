@@ -8,7 +8,8 @@ import sys
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, font as tkfont
+from tkinter import filedialog
+from tkinter import font as tkfont
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 

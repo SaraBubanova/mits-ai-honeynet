@@ -56,8 +56,8 @@ def run(cfg):
         print("note: editcap not found, truncated pcaps cannot be repaired (install Wireshark)")
 
     sys.path.insert(0, str(REPO_ROOT / "pcap"))
-    import ssh_enrichment
     import http_enrichment
+    import ssh_enrichment
 
     old_cwd = os.getcwd()
     os.chdir(work_dir)

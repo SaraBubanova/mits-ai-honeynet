@@ -25,7 +25,7 @@ log = logging.getLogger("honeynet")
 SOURCES = {
     "suricata": ["suricata_verdict"],
     "cowrie": ["cowrie_classifier", "cowrie_verdict"],
-    "pcap": ["pcap_split", "pcap_verdict"],
+    "pcap": ["pcap_split", "pcap_flows", "pcap_enrich", "pcap_verdict"],
 }
 AFTER_SOURCES = ["summary", "visualiser", "pdf"]
 ALL_STEPS = [s for steps in SOURCES.values() for s in steps] + AFTER_SOURCES

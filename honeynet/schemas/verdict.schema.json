@@ -1,19 +1,25 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Verdict",
-  "description": "One conclusion about one entity (IP address, flow cluster, ...) from one step.",
+  "description": "One conclusion about one entity (IP address, flow cluster, ...) from one step. PRELIMINARY: the optional fields are suggestions, to be settled with the team.",
   "type": "object",
   "additionalProperties": false,
   "required": ["source", "model", "entity_type", "entity_id", "label", "severity", "confidence", "summary", "evidence"],
   "properties": {
     "source":      {"type": "string", "enum": ["suricata", "cowrie", "pcap"]},
-    "model":       {"type": "string"},
+    "model":       {"type": "string", "description": "LLM name, or 'none' for a stats-only verdict nobody reviewed"},
     "entity_type": {"type": "string", "enum": ["ip", "flow_cluster"]},
     "entity_id":   {"type": "string"},
     "label":       {"type": "string"},
     "severity":    {"type": "string", "enum": ["info", "low", "medium", "high", "critical"]},
     "confidence":  {"type": "number", "minimum": 0, "maximum": 1},
     "summary":     {"type": "string"},
-    "evidence":    {"type": "array", "items": {"type": "string"}}
+    "evidence":    {"type": "array", "items": {"type": "string"}},
+
+    "verdict":             {"type": "string", "enum": ["benign", "suspicious", "malicious"]},
+    "recommended_actions": {"type": "array", "items": {"type": "string"}},
+    "first_seen":          {"type": "string", "description": "ISO 8601, UTC"},
+    "last_seen":           {"type": "string", "description": "ISO 8601, UTC"},
+    "event_count":         {"type": "integer", "minimum": 0, "description": "flows / sessions / alerts behind this verdict"}
   }
 }

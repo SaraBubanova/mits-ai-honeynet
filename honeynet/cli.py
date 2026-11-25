@@ -78,7 +78,12 @@ def main(argv=None):
     p_run.add_argument("target", choices=[*SOURCES, "all"])
     p_step = sub.add_parser("step", parents=[inputs], help="run one step")
     p_step.add_argument("name", choices=ALL_STEPS)
+    sub.add_parser("check-llm", help="test the LLM settings in .env with one small request")
     args = ap.parse_args(argv)
+
+    if args.command == "check-llm":
+        from . import llm
+        sys.exit(0 if llm.check() else 1)
 
     if args.command == "step":
         names = [args.name]

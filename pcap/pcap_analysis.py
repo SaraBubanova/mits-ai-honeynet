@@ -4,7 +4,6 @@ import pandas as pd
 import subprocess
 import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from pcap_splitter_script.split_pcaps_by_day import split_by_day
 
 PORTS = [22, 23, 80, 10110]
 MAX_PCAP_SIZE_GB = 1
@@ -177,6 +176,10 @@ def merge_and_sort_all():
     merge_and_sort_csvs(port)
 
 if __name__ == "__main__":
+  # Only needed when this file is run on its own. The honeynet GUI runs the day split
+  # as its own step (pcap_split) and imports the functions above instead.
+  from pcap_splitter_script.split_pcaps_by_day import split_by_day
+
   Path("results").mkdir(parents=True, exist_ok=True)
   # Local Folder vs External Volume
   # RAW_PCAP_DIR = "samples"

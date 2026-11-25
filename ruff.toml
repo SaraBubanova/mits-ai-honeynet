@@ -9,3 +9,6 @@ ignore = [
   "SIM113",  # manual counters
   "SIM115",  # file handles kept open on purpose
 ]
+
+[lint.per-file-ignores]
+"tests/*" = ["S101"]

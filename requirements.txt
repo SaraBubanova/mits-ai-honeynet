@@ -3,3 +3,4 @@ pandas
 nfstream
 python-dotenv
 prefixspan
+requests

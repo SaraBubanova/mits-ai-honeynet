@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Verdict",
+  "description": "One conclusion about one entity (IP address, flow cluster, ...) from one step.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "model", "entity_type", "entity_id", "label", "severity", "confidence", "summary", "evidence"],
+  "properties": {
+    "source":      {"type": "string", "enum": ["suricata", "cowrie", "pcap"]},
+    "model":       {"type": "string"},
+    "entity_type": {"type": "string", "enum": ["ip", "flow_cluster"]},
+    "entity_id":   {"type": "string"},
+    "label":       {"type": "string"},
+    "severity":    {"type": "string", "enum": ["info", "low", "medium", "high", "critical"]},
+    "confidence":  {"type": "number", "minimum": 0, "maximum": 1},
+    "summary":     {"type": "string"},
+    "evidence":    {"type": "array", "items": {"type": "string"}}
+  }
+}

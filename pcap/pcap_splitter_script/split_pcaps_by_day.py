@@ -23,9 +23,12 @@ Note: pcapng files are not supported (this tool handles classic pcap only).
 """
 
 import argparse
+import heapq
 import os
+import shutil
 import struct
 import sys
+import tempfile
 from datetime import datetime, timezone
 
 # magic -> (struct endian prefix, timestamp fraction divisor)
@@ -36,6 +39,10 @@ PCAP_MAGICS = {
     b'\xa1\xb2\x3c\x4d': ('>', 1_000_000_000),  # nanosecond, big-endian
 }
 PCAPNG_MAGIC = b'\x0a\x0d\x0d\x0a'
+
+# Some datasets are anonymised: timestamps count from zero (1970) instead of the real
+# capture time, so splitting by day is meaningless. Anything earlier than this is suspect.
+MIN_REAL_TS = datetime(2000, 1, 1, tzinfo=timezone.utc).timestamp()
 
 
 def iter_packets(path):
@@ -86,9 +93,13 @@ def collect_inputs(args):
     files = []
     for a in args:
         if os.path.isdir(a):
+            # Same rule as pcap_analysis.py: any name containing ".pcap" counts,
+            # so rotated files like "log.pcap.43235343" are found. Subfolders too.
             found = sorted(
-                os.path.join(a, f) for f in os.listdir(a)
-                if f.lower().endswith(('.pcap', '.cap'))
+                os.path.join(root, f)
+                for root, _dirs, names in os.walk(a)
+                for f in names
+                if '.pcap' in f.lower() or f.lower().endswith('.cap')
             )
             if not found:
                 print(f'warning: no .pcap/.cap files in directory {a}', file=sys.stderr)
@@ -100,6 +111,131 @@ def collect_inputs(args):
     return files
 
 
+def fmt_ts(ts, tz):
+    dt = datetime.fromtimestamp(ts, tz) if tz else datetime.fromtimestamp(ts)
+    return dt.strftime('%Y-%m-%d %H:%M:%S')
+
+
+def read_run(path, endian, div):
+    """Yield (ts, record_header, packet_bytes) from a spilled run file."""
+    with open(path, 'rb') as f:
+        while True:
+            rec = f.read(16)
+            if not rec:
+                return
+            ts_sec, ts_frac, incl_len, _orig = struct.unpack(endian + 'IIII', rec)
+            yield ts_sec + ts_frac / div, rec, f.read(incl_len)
+
+
+def sorted_run(run):
+    """Return an iterator over one run in timestamp order.
+
+    Captures are normally written in time order, so a run is just streamed
+    from disk. If a run has out-of-order packets (flagged while spilling) it is
+    sorted in memory first; that costs at most one input file's share of one day.
+    """
+    packets = read_run(run['path'], run['endian'], run['div'])
+    if run['in_order']:
+        return packets
+    return iter(sorted(packets, key=lambda p: p[0]))
+
+
+def split_by_day(inputs, outdir, tz_name='UTC'):
+    """Split/merge the pcaps in `inputs` (files and/or folders) into OUTDIR/YYYY-MM-DD.pcap.
+
+    Raises ValueError if no pcap files are found and RuntimeError if the packet
+    counts going in and out differ. Can be imported, e.g. by pcap_analysis.py.
+    """
+    tz = resolve_tz(tz_name)
+    files = collect_inputs(inputs)
+    if not files:
+        raise ValueError('no input pcap files found')
+
+    os.makedirs(outdir, exist_ok=True)
+
+    # Memory use stays small: packets are streamed to temporary "run" files on
+    # disk (one per day and input file), then each day is built by merging its runs.
+    # The temp folder sits inside OUTDIR so it uses the same disk as the output.
+    tmp_dir = tempfile.mkdtemp(prefix='.split_runs_', dir=outdir)
+    try:
+        suspect_files = []   # inputs whose timestamps look anonymised
+        day_header = {}   # day -> pcap global header of the first file seen for that day
+        day_runs = {}     # day -> [run dict, ...] in input order
+        total_in = 0
+
+        for file_no, path in enumerate(files):
+            n = 0
+            first = last = None
+            handles = {}  # day -> open run file, for this input file only
+            runs = {}     # day -> run dict, for this input file only
+            try:
+                for ts, rec, data, header in iter_packets(path):
+                    day = day_of(ts, tz)
+                    if day not in handles:
+                        run_path = os.path.join(tmp_dir, f'{day}_{file_no:05d}.run')
+                        handles[day] = open(run_path, 'wb')
+                        endian, div = PCAP_MAGICS[header[:4]]
+                        runs[day] = {'path': run_path, 'endian': endian, 'div': div,
+                                     'in_order': True, 'last_ts': None}
+                        day_runs.setdefault(day, []).append(runs[day])
+                        if day not in day_header:
+                            day_header[day] = header
+                        elif day_header[day] != header:
+                            print(f'warning: {path} has a different pcap header than the first file for '
+                                  f'{day}; keeping the first header (linktype may differ)', file=sys.stderr)
+                    run = runs[day]
+                    if run['last_ts'] is not None and ts < run['last_ts']:
+                        run['in_order'] = False
+                    run['last_ts'] = ts
+                    handles[day].write(rec)
+                    handles[day].write(data)
+                    if first is None:
+                        first = ts
+                    last = ts
+                    n += 1
+            finally:
+                for h in handles.values():
+                    h.close()
+            total_in += n
+            if n:
+                print(f'  read {path}: {n} packets, {fmt_ts(first, tz)} -> {fmt_ts(last, tz)}')
+                if first < MIN_REAL_TS:
+                    suspect_files.append(path)
+                    print(f'WARNING: {path} starts at {fmt_ts(first, tz)}. The timestamps look '
+                          f'anonymised or relative, so the dates are not real.', file=sys.stderr)
+            else:
+                print(f'  read {path}: 0 packets')
+
+        total_out = 0
+        for day in sorted(day_runs):
+            out_path = os.path.join(outdir, f'{day}.pcap')
+            count = 0
+            t0 = t1 = None
+            streams = [sorted_run(r) for r in day_runs[day]]
+            with open(out_path, 'wb') as out:
+                out.write(day_header[day])
+                # heapq.merge keeps only one packet per run in memory; ties keep input order
+                for ts, rec, data in heapq.merge(*streams, key=lambda p: p[0]):
+                    out.write(rec)
+                    out.write(data)
+                    if t0 is None:
+                        t0 = ts
+                    t1 = ts
+                    count += 1
+            total_out += count
+            print(f'  wrote {out_path}: {count} packets, {fmt_ts(t0, tz)} -> {fmt_ts(t1, tz)}')
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    print(f'done: {total_in} packets in -> {total_out} packets out, '
+          f'{len(day_runs)} day file(s) in {outdir}/')
+    if suspect_files:
+        print(f'WARNING: {len(suspect_files)} input file(s) have timestamps before 2000, so the '
+              f'day split is not meaningful for them. See the warnings above.', file=sys.stderr)
+    if total_in != total_out:
+        raise RuntimeError(f'packet count mismatch: {total_in} in, {total_out} out')
+
+
 def main():
     ap = argparse.ArgumentParser(description='Split/merge pcap files into one file per calendar day.')
     ap.add_argument('inputs', nargs='+', help='pcap files and/or directories containing pcaps')
@@ -107,58 +243,10 @@ def main():
     ap.add_argument('--tz', default='UTC',
                     help="timezone for day boundaries: IANA name (Europe/Amsterdam), UTC (default), or LOCAL")
     args = ap.parse_args()
-
-    tz = resolve_tz(args.tz)
-    files = collect_inputs(args.inputs)
-    if not files:
-        sys.exit('error: no input pcap files found')
-
-    os.makedirs(args.outdir, exist_ok=True)
-
-    # day -> {'header': bytes, 'linktype': int, 'packets': [(ts, rec, data)]}
-    days = {}
-    total_in = 0
-    for path in files:
-        n = 0
-        first = last = None
-        for ts, rec, data, header in iter_packets(path):
-            day = day_of(ts, tz)
-            d = days.setdefault(day, {'header': header, 'packets': []})
-            if d['header'] != header:
-                print(f'warning: {path} has a different pcap header than the first file for '
-                      f'{day}; keeping the first header (linktype may differ)', file=sys.stderr)
-            d['packets'].append((ts, rec, data))
-            if first is None:
-                first = ts
-            last = ts
-            n += 1
-        total_in += n
-        fmt = '%Y-%m-%d %H:%M:%S'
-        print(f'  read {path}: {n} packets, '
-              f'{datetime.fromtimestamp(first, tz).strftime(fmt) if tz else datetime.fromtimestamp(first).strftime(fmt)}'
-              f' -> '
-              f'{datetime.fromtimestamp(last, tz).strftime(fmt) if tz else datetime.fromtimestamp(last).strftime(fmt)}')
-
-    total_out = 0
-    for day in sorted(days):
-        packets = sorted(days[day]['packets'], key=lambda p: p[0])
-        out_path = os.path.join(args.outdir, f'{day}.pcap')
-        with open(out_path, 'wb') as out:
-            out.write(days[day]['header'])
-            for _ts, rec, data in packets:
-                out.write(rec)
-                out.write(data)
-        total_out += len(packets)
-        t0, t1 = packets[0][0], packets[-1][0]
-        show = (lambda t: datetime.fromtimestamp(t, tz).strftime('%Y-%m-%d %H:%M:%S')) if tz \
-            else (lambda t: datetime.fromtimestamp(t).strftime('%Y-%m-%d %H:%M:%S'))
-        print(f'  wrote {out_path}: {len(packets)} packets, {show(t0)} -> {show(t1)}')
-
-    print(f'done: {total_in} packets in -> {total_out} packets out, '
-          f'{len(days)} day file(s) in {args.outdir}/')
-    if total_in != total_out:
-        print('warning: packet count mismatch!', file=sys.stderr)
-        sys.exit(1)
+    try:
+        split_by_day(args.inputs, args.outdir, args.tz)
+    except (ValueError, RuntimeError) as e:
+        sys.exit(f'error: {e}')
 
 
 if __name__ == '__main__':

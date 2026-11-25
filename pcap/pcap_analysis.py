@@ -4,10 +4,12 @@ import pandas as pd
 import subprocess
 import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from pcap_splitter_script.split_pcaps_by_day import split_by_day
 
 PORTS = [22, 23, 80, 10110]
 MAX_PCAP_SIZE_GB = 1
 SPLIT_DIR = Path("preprocessed_pcaps")
+DAY_DIR = Path("pcaps_by_day")  # output of the day splitter, input of the size splitter
 MAX_WORKERS = 3
 
 def get_clean_stem(file_path):
@@ -177,7 +179,15 @@ def merge_and_sort_all():
 if __name__ == "__main__":
   Path("results").mkdir(parents=True, exist_ok=True)
   # Local Folder vs External Volume
-  # split_all_pcaps("samples")
-  split_all_pcaps("/Volumes/New Volume")
+  # RAW_PCAP_DIR = "samples"
+  RAW_PCAP_DIR = "/Volumes/New Volume"
+
+  # Step 1: one pcap per calendar day (UTC), rebuilt on every run
+  if DAY_DIR.exists():
+    shutil.rmtree(DAY_DIR)
+  split_by_day([RAW_PCAP_DIR], DAY_DIR)
+
+  # Step 2: split day files over MAX_PCAP_SIZE_GB into chunks (unchanged from before)
+  split_all_pcaps(DAY_DIR)
   process_pcap_folder()
   merge_and_sort_all()
